@@ -81,6 +81,7 @@ def _is_write_query(query: str) -> bool:
 
 
 def create_mcp_server(neo4j_driver: AsyncDriver, database: str = "neo4j") -> FastMCP:
+    print("Creating MCP server")
     mcp: FastMCP = FastMCP("mcp-neo4j-cypher", dependencies=["neo4j", "pydantic"])
 
     async def get_neo4j_schema() -> list[types.TextContent]:
@@ -112,6 +113,36 @@ RETURN label, apoc.map.fromPairs(attributes) as attributes, apoc.map.fromPairs(r
             logger.error(f"Database error retrieving schema: {e}")
             return [types.TextContent(type="text", text=f"Error: {e}")]
 
+    async def get_graph_labels() -> list[types.TextContent]:
+        """fetch and return all labels in the graph.
+        """
+
+        get_graph_labels_query = """
+CALL db.labels() YIELD label
+RETURN apoc.text.join(collect(label), ',')
+"""
+
+        try:
+            async with neo4j_driver.session(database=database) as session:
+                results_json_str = await session.execute_read(
+                    _read, get_graph_labels_query, dict()
+                )
+
+                logger.debug(f"Read query returned {len(results_json_str)} rows")
+
+                return [types.TextContent(type="text", text=results_json_str)]
+
+        except Exception as e:
+            logger.error(f"Database error retrieving schema: {e}")
+            return [types.TextContent(type="text", text=f"Error: {e}")]
+
+    async def get_relationships_between_nodes(
+        node1: str, node2: str
+    ) -> list[types.TextContent]:
+        """Get the relationships between two nodes."""
+        query = f"MATCH (n1)-[r]-(n2) WHERE n1.name = '{node1}' AND n2.name = '{node2}' RETURN r"
+        return await read_neo4j_cypher(query)
+
     async def read_neo4j_cypher(
         query: str = Field(..., description="The Cypher query to execute."),
         params: Optional[dict[str, Any]] = Field(
@@ -119,6 +150,10 @@ RETURN label, apoc.map.fromPairs(attributes) as attributes, apoc.map.fromPairs(r
         ),
     ) -> list[types.TextContent]:
         """Execute a read Cypher query on the neo4j database."""
+
+        print(f"Reading Neo4j Cypher query: {query}")
+
+        logger.info(f"Reading Neo4j Cypher query: {query}")
 
         if _is_write_query(query):
             raise ValueError("Only MATCH queries are allowed for read-query")
@@ -132,10 +167,13 @@ RETURN label, apoc.map.fromPairs(attributes) as attributes, apoc.map.fromPairs(r
                 return [types.TextContent(type="text", text=results_json_str)]
 
         except Exception as e:
-            logger.error(f"Database error executing query: {e}\n{query}\n{params}")
+            logger.info(f"Database error executing query: {e}\n{query}\n{params}")
             return [
                 types.TextContent(type="text", text=f"Error: {e}\n{query}\n{params}")
             ]
+
+
+
 
     async def write_neo4j_cypher(
         query: str = Field(..., description="The Cypher query to execute."),
@@ -165,9 +203,10 @@ RETURN label, apoc.map.fromPairs(attributes) as attributes, apoc.map.fromPairs(r
                 types.TextContent(type="text", text=f"Error: {e}\n{query}\n{params}")
             ]
 
-    mcp.add_tool(get_neo4j_schema)
+    # mcp.add_tool(get_neo4j_schema)
     mcp.add_tool(read_neo4j_cypher)
-    mcp.add_tool(write_neo4j_cypher)
+    mcp.add_tool(get_graph_labels)
+    # mcp.add_tool(write_neo4j_cypher)
 
     return mcp
 
@@ -178,7 +217,8 @@ def main(
     password: str,
     database: str,
 ) -> None:
-    logger.info("Starting MCP neo4j Server")
+    print("Starting MCP neo4j Server")
+    # logger.info("Starting MCP neo4j Server")
 
     neo4j_driver = AsyncGraphDatabase.driver(
         db_url,
@@ -192,7 +232,7 @@ def main(
 
     healthcheck(db_url, username, password, database)
 
-    mcp.run(transport="stdio")
+    mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":
