@@ -1,0 +1,35 @@
+services:
+  cypher:
+    container_name: mcp-neo4j-cypher
+    image: mcp-neo4j-cypher:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      - FASTMCP_HOST=0.0.0.0
+      - FASTMCP_DEBUG=true
+      - FASTMCP_LOG_LEVEL=DEBUG
+      - FASTMCP_STATELESS_HTTP=true
+      - FASTMCP_TRANSPORT=streamable-http
+      - FASTMCP_STREAMABLE_HTTP_PATH=/mcp
+      - FASTMCP_JSON_RESPONSE=true
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import neo4j; driver = neo4j.GraphDatabase.driver('${NEO4J_URL}', auth=('${NEO4J_USERNAME}', '${NEO4J_PASSWORD}')); driver.verify_connectivity(); driver.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s 
+    command: mcp-neo4j-cypher --db-url "${NEO4J_URL}" --username "${NEO4J_USERNAME}" --password "${NEO4J_PASSWORD}"
+    networks:
+      - ais-hypernova_default
+      - mcp-neo4j-bridge-network
+    restart: unless-stopped
+
+networks:
+  ais-hypernova_default:
+    external: true
+  mcp-neo4j-bridge-network:
+    driver: bridge
