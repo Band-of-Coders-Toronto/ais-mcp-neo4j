@@ -238,10 +238,6 @@ def main(
 
     healthcheck(db_url, username, password, database)
 
-    logger.info(f"db_url: {db_url}")
-    logger.info(f"username: {username}")
-    logger.info(f"database: {database}")
-
     mcp.run(transport="streamable-http")
 
 
