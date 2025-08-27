@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -26,7 +27,7 @@ def healthcheck(db_url: str, username: str, password: str, database: str) -> Non
     Creates a a sync Neo4j driver instance for checking connection and closes it after connection is established.
     """
 
-    print("Confirming Neo4j is running...", file=sys.stderr)
+    logger.info("Confirming Neo4j is running...")
     sync_driver = GraphDatabase.driver(
         db_url,
         auth=(
@@ -36,7 +37,7 @@ def healthcheck(db_url: str, username: str, password: str, database: str) -> Non
     )
     attempts = 0
     success = False
-    print("\nWaiting for Neo4j to Start...\n", file=sys.stderr)
+    logger.info("\nWaiting for Neo4j to Start...\n")
     time.sleep(3)
     ex = DatabaseError()
     while not success and attempts < 3:
@@ -48,11 +49,10 @@ def healthcheck(db_url: str, username: str, password: str, database: str) -> Non
         except Exception as e:
             ex = e
             attempts += 1
-            print(
-                f"failed connection {attempts} | waiting {(1 + attempts) * 2} seconds...",
-                file=sys.stderr,
+            logger.error(
+                f"failed connection {attempts} | waiting {(1 + attempts) * 2} seconds..."
             )
-            print(f"Error: {e}", file=sys.stderr)
+            logger.error(f"Error: {e}")
             time.sleep((1 + attempts) * 2)
     if not success:
         sync_driver.close()
@@ -81,8 +81,17 @@ def _is_write_query(query: str) -> bool:
 
 
 def create_mcp_server(neo4j_driver: AsyncDriver, database: str = "neo4j") -> FastMCP:
-    print("Creating MCP server")
-    mcp: FastMCP = FastMCP("mcp-neo4j-cypher", dependencies=["neo4j", "pydantic"])
+    logger.info("Creating MCP server")
+    # Read FastMCP configuration from environment variables
+    host = os.getenv("FASTMCP_HOST", "127.0.0.1")
+    port = int(os.getenv("FASTMCP_PORT", "8000"))
+    
+    mcp: FastMCP = FastMCP(
+        "mcp-neo4j-cypher", 
+        dependencies=["neo4j", "pydantic"],
+        host=host,
+        port=port
+    )
 
     async def get_neo4j_schema() -> list[types.TextContent]:
         """List all node, their attributes and their relationships to other nodes in the neo4j database.
@@ -151,8 +160,6 @@ RETURN apoc.text.join(collect(label), ',')
     ) -> list[types.TextContent]:
         """Execute a read Cypher query on the neo4j database."""
 
-        print(f"Reading Neo4j Cypher query: {query}")
-
         logger.info(f"Reading Neo4j Cypher query: {query}")
 
         if _is_write_query(query):
@@ -217,8 +224,7 @@ def main(
     password: str,
     database: str,
 ) -> None:
-    print("Starting MCP neo4j Server")
-    # logger.info("Starting MCP neo4j Server")
+    logger.info("Starting MCP neo4j Server")
 
     neo4j_driver = AsyncGraphDatabase.driver(
         db_url,
@@ -231,6 +237,10 @@ def main(
     mcp = create_mcp_server(neo4j_driver, database)
 
     healthcheck(db_url, username, password, database)
+
+    logger.info(f"db_url: {db_url}")
+    logger.info(f"username: {username}")
+    logger.info(f"database: {database}")
 
     mcp.run(transport="streamable-http")
 

@@ -18,4 +18,4 @@ COPY README.md /app/
 RUN pip install --no-cache-dir -e .
 
 # Command to run the server using the package entry point
-CMD ["sh", "-c", "mcp-neo4j-cypher --db-url ${NEO4J_URL} --username ${NEO4J_USERNAME} --password ${NEO4J_PASSWORD}"]
+CMD ["sh", "-c", "mcp-neo4j-cypher --db-url ${N4J_URL} --username ${N4J_USERNAME} --password ${N4J_PASSWORD}"]
