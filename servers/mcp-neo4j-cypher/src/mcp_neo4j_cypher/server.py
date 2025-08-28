@@ -123,33 +123,38 @@ RETURN label, apoc.map.fromPairs(attributes) as attributes, apoc.map.fromPairs(r
             return [types.TextContent(type="text", text=f"Error: {e}")]
 
     async def get_graph_labels() -> list[types.TextContent]:
-        """fetch and return all labels in the graph.
         """
-
-        get_graph_labels_query = """
+        Fetch and return all labels in the graph.
+        Returned labels are required for future queries, and are case-sensitive.
+        """
+        query = """
 CALL db.labels() YIELD label
 RETURN apoc.text.join(collect(label), ',')
 """
+        return await read_neo4j_cypher(query, {})
 
-        try:
-            async with neo4j_driver.session(database=database) as session:
-                results_json_str = await session.execute_read(
-                    _read, get_graph_labels_query, dict()
-                )
+    async def get_count_nodes_by_label(label: str = Field(..., description="The label of the node type to count.")) -> list[types.TextContent]:
+        """
+        Fetch and return the number of nodes in the graph with the given label.
+        Only labels returned by get_graph_labels() are valid.
+        """
+        query = f"MATCH (n:{label}) RETURN count(n)"
+        return await read_neo4j_cypher(query, {})
 
-                logger.debug(f"Read query returned {len(results_json_str)} rows")
-
-                return [types.TextContent(type="text", text=results_json_str)]
-
-        except Exception as e:
-            logger.error(f"Database error retrieving schema: {e}")
-            return [types.TextContent(type="text", text=f"Error: {e}")]
 
     async def get_relationships_between_nodes(
-        node1: str, node2: str
+        node1: str = Field(..., description="The label of the first node type."),
+        node2: str = Field(..., description="The label of the second node type."),
     ) -> list[types.TextContent]:
-        """Get the relationships between two nodes."""
-        query = f"MATCH (n1)-[r]-(n2) WHERE n1.name = '{node1}' AND n2.name = '{node2}' RETURN r"
+        """
+        Fetch and return the distinct relationship types between two the given node types.
+        Specifically, those directed from node1 to node2.
+        Only labels returned by get_graph_labels() are valid.
+        """
+        query =f"""
+MATCH (n1:{node1})-[r]->(n2:{node2}) 
+RETURN collect(DISTINCT type(r)) AS relationship_types
+"""
         return await read_neo4j_cypher(query)
 
     async def read_neo4j_cypher(
@@ -213,6 +218,8 @@ RETURN apoc.text.join(collect(label), ',')
     # mcp.add_tool(get_neo4j_schema)
     mcp.add_tool(read_neo4j_cypher)
     mcp.add_tool(get_graph_labels)
+    mcp.add_tool(get_count_nodes_by_label)
+    mcp.add_tool(get_relationships_between_nodes)
     # mcp.add_tool(write_neo4j_cypher)
 
     return mcp
