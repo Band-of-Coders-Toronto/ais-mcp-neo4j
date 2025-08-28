@@ -148,27 +148,62 @@ RETURN apoc.text.join(collect(label), ',')
     ) -> list[types.TextContent]:
         """
         Fetch and return the distinct relationship types between two the given node types.
-        Specifically, those directed from node1 to node2.
+        Returns directional relationship information in format: node1->node2:TYPE, node2->node1:TYPE, node1-node2:
         Only labels returned by get_graph_labels() are valid.
         """
-        query =f"""
-MATCH (n1:{node1})-[r]-(n2:{node2}) 
-RETURN collect(DISTINCT type(r)) AS relationship_types
-"""
-        
-        params = {"node1": node1, "node2": node2}
         try:
             async with neo4j_driver.session(database=database) as session:
-                results_json_str = await session.execute_read(_read, query, params)
+                # Query directed relationships node1 -> node2
+                forward_query = f"MATCH (n1:{node1})-[r]->(n2:{node2}) RETURN collect(DISTINCT type(r)) AS relationship_types"
+                forward_results = await session.execute_read(_read, forward_query, {})
+                forward_data = json.loads(forward_results)
+                forward_types = forward_data[0]["relationship_types"] if forward_data else []
+                
+                # Query directed relationships node2 -> node1
+                backward_query = f"MATCH (n2:{node2})-[r]->(n1:{node1}) RETURN collect(DISTINCT type(r)) AS relationship_types"
+                backward_results = await session.execute_read(_read, backward_query, {})
+                backward_data = json.loads(backward_results)
+                backward_types = backward_data[0]["relationship_types"] if backward_data else []
+                
+                # Query undirected relationships (both ways)
+                undirected_query = f"MATCH (n1:{node1})-[r]-(n2:{node2}) RETURN collect(DISTINCT type(r)) AS relationship_types"
+                undirected_results = await session.execute_read(_read, undirected_query, {})
+                undirected_data = json.loads(undirected_results)
+                all_undirected_types = undirected_data[0]["relationship_types"] if undirected_data else []
+                
+                # Calculate truly undirected relationships (those that appear in both directions)
+                forward_set = set(forward_types)
+                backward_set = set(backward_types)
+                all_directed = forward_set.union(backward_set)
+                truly_undirected = [rel for rel in all_undirected_types if rel not in all_directed]
+                
+                # Format the output as requested
+                formatted_relationships = []
+                
+                # Add directed relationships node1 -> node2
+                for rel_type in forward_types:
+                    formatted_relationships.append(f"{node1}->{node2}:{rel_type}")
+                
+                # Add directed relationships node2 -> node1
+                for rel_type in backward_types:
+                    formatted_relationships.append(f"{node2}->{node1}:{rel_type}")
+                
+                # Add undirected relationships (empty string after colon if none)
+                undirected_str = ",".join(truly_undirected) if truly_undirected else ""
+                formatted_relationships.append(f"{node1}-{node2}:{undirected_str}")
+                
+                # Create the result in expected format
+                result = [{"relationship_types": formatted_relationships}]
+                result_json = json.dumps(result)
 
-                logger.debug(f"Read query returned {len(results_json_str)} rows")
+                logger.debug(f"Directional relationship query returned {len(formatted_relationships)} relationship entries")
 
-                return [types.TextContent(type="text", text=results_json_str)]
+                return [types.TextContent(type="text", text=result_json)]
 
         except Exception as e:
-            logger.info(f"Database error executing query: {e}\n{query}\n{params}")
+            logger.info(f"Database error executing directional relationship query: {e}")
             return [
-                types.TextContent(type="text", text=f"Error: {e}\n{query}\n{params}")
+                types.TextContent(type="text", text=f"Error: {e}")
             ]
 
     async def read_neo4j_cypher(

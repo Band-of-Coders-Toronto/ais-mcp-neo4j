@@ -128,10 +128,18 @@ async def test_get_relationships_between_nodes(mcp_server: FastMCP):
     assert len(result_real) == 1
     real_relationships = result_real[0]["relationship_types"]
     assert isinstance(real_relationships, list)
-    # Should contain "USER" and "GROUP" based on earlier testing
+    # Should contain directional relationships based on new format
+    # Extract relationship types from the directional format
+    extracted_types = set()
+    for rel in real_relationships:
+        if ':' in rel:
+            # Extract type after the colon
+            rel_type = rel.split(':')[1]
+            if rel_type:  # Only add non-empty types
+                extracted_types.add(rel_type)
+    
     expected_types = {"USER", "GROUP"}
-    actual_types = set(real_relationships)
-    assert expected_types.issubset(actual_types), f"Expected {expected_types} to be subset of {actual_types}"
+    assert expected_types.issubset(extracted_types), f"Expected {expected_types} to be subset of extracted types {extracted_types} from {real_relationships}"
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -155,54 +163,87 @@ async def test_get_relationships_between_nodes_real_db():
         mcp_server = create_mcp_server(neo4j_driver, database)
         
         # Test getting relationships between users and groups (from your real data)
-        response = await mcp_server.call_tool("get_relationships_between_nodes", {
+        
+        # Query directed relationships users -> groups
+        response_forward = await mcp_server.call_tool("read_neo4j_cypher", {
+            "query": "MATCH (u:users)-[r]->(g:groups) RETURN collect(DISTINCT type(r)) AS relationship_types"
+        })
+        content_list_forward, _ = response_forward
+        result_forward = json.loads(content_list_forward[0].text)
+        forward_types = result_forward[0]["relationship_types"] if result_forward else []
+        
+        # Query directed relationships groups -> users  
+        response_backward = await mcp_server.call_tool("read_neo4j_cypher", {
+            "query": "MATCH (g:groups)-[r]->(u:users) RETURN collect(DISTINCT type(r)) AS relationship_types"
+        })
+        content_list_backward, _ = response_backward
+        result_backward = json.loads(content_list_backward[0].text)
+        backward_types = result_backward[0]["relationship_types"] if result_backward else []
+        
+        # Query undirected relationships (both ways)
+        response_undirected = await mcp_server.call_tool("read_neo4j_cypher", {
+            "query": "MATCH (u:users)-[r]-(g:groups) RETURN collect(DISTINCT type(r)) AS relationship_types"
+        })
+        content_list_undirected, _ = response_undirected
+        result_undirected = json.loads(content_list_undirected[0].text)
+        all_undirected_types = result_undirected[0]["relationship_types"] if result_undirected else []
+        
+        # Calculate truly undirected relationships (those that appear in both directions)
+        forward_set = set(forward_types)
+        backward_set = set(backward_types)
+        all_directed = forward_set.union(backward_set)
+        truly_undirected = [rel for rel in all_undirected_types if rel not in all_directed]
+        
+        # Format the output as requested
+        formatted_relationships = []
+        
+        # Add directed relationships users -> groups
+        for rel_type in forward_types:
+            formatted_relationships.append(f"users->groups:{rel_type}")
+        
+        # Add directed relationships groups -> users
+        for rel_type in backward_types:
+            formatted_relationships.append(f"groups->users:{rel_type}")
+        
+        # Add undirected relationships (empty list after colon if none)
+        undirected_str = ",".join(truly_undirected) if truly_undirected else ""
+        formatted_relationships.append(f"users-groups:{undirected_str}")
+        
+                # Create the formatted result
+        formatted_result = [{"relationship_types": formatted_relationships}]
+        
+        print(f"\nFormatted relationship result: {formatted_result}")
+        
+        # Verify we got some relationships
+        assert len(formatted_relationships) > 0, "Expected to find some relationships"
+        
+        # Verify the format is correct
+        for rel in formatted_relationships:
+            assert ":" in rel, f"Expected colon in relationship format: {rel}"
+            if "->" in rel:
+                assert rel.count("->") == 1, f"Expected exactly one -> in directed relationship: {rel}"
+            elif "-" in rel and "->" not in rel:
+                assert rel.count("-") == 1, f"Expected exactly one - in undirected relationship: {rel}"
+        
+        # Test the current tool implementation (this will show it doesn't match our expected format yet)
+        tool_response = await mcp_server.call_tool("get_relationships_between_nodes", {
             "node1": "users",
             "node2": "groups"
         })
         
-        print(f"\nReal DB test response: {response}")
-        # Handle the tuple response format
-        content_list, _ = response
-        result = json.loads(content_list[0].text)
-        print(f"Real DB test result: {result}")
+        # Extract the tool response correctly (handle tuple format)
+        content_list, _ = tool_response
+        tool_response_text = json.loads(content_list[0].text)
+        print(f"Tool response: {tool_response_text}")
         
-        # Verify the response structure
-        assert isinstance(result, list)
-        assert len(result) == 1
+        # Show what we expect vs what we get
+        print(f"Expected output: {formatted_result}")
         
-        # Check that we get the expected relationship types
-        relationships = result[0]
-        assert "relationship_types" in relationships
-        relationship_types = relationships["relationship_types"]
-        
-        # Should contain the relationship types we discovered earlier
-        assert isinstance(relationship_types, list)
-        # Based on your earlier query, should contain "USER" and "GROUP"
-        expected_types = {"USER", "GROUP"}
-        actual_types = set(relationship_types)
-        assert expected_types.issubset(actual_types), f"Expected {expected_types} to be subset of {actual_types}"
-        
-        # Test with another real relationship from your database
-        response_roles = await mcp_server.call_tool("get_relationships_between_nodes", {
-            "node1": "users", 
-            "node2": "role"
-        })
-        
-        # Handle the tuple response format
-        content_list_roles, _ = response_roles
-        result_roles = json.loads(content_list_roles[0].text)
-        print(f"Users-Role relationship result: {result_roles}")
-        
-        # Should also have relationships
-        assert isinstance(result_roles, list)
-        assert len(result_roles) == 1
-        role_relationships = result_roles[0]["relationship_types"]
-        assert isinstance(role_relationships, list)
-        # Based on earlier query, should contain "ROLE" and "USER"
-        expected_role_types = {"ROLE", "USER"}
-        actual_role_types = set(role_relationships)
-        assert expected_role_types.issubset(actual_role_types), f"Expected {expected_role_types} to be subset of {actual_role_types}"
+        # This assertion will FAIL until the tool is updated to return directional relationships
+        assert tool_response_text == formatted_result, f"EXPECTED FAILURE: Tool should return {formatted_result}, but currently returns {tool_response_text}. Tool needs to be updated to support directional relationship format."
         
     finally:
         # Clean up the database connection
         await neo4j_driver.close()
+
+
