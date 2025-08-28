@@ -152,10 +152,24 @@ RETURN apoc.text.join(collect(label), ',')
         Only labels returned by get_graph_labels() are valid.
         """
         query =f"""
-MATCH (n1:{node1})-[r]->(n2:{node2}) 
+MATCH (n1:{node1})-[r]-(n2:{node2}) 
 RETURN collect(DISTINCT type(r)) AS relationship_types
 """
-        return await read_neo4j_cypher(query)
+        
+        params = {"node1": node1, "node2": node2}
+        try:
+            async with neo4j_driver.session(database=database) as session:
+                results_json_str = await session.execute_read(_read, query, params)
+
+                logger.debug(f"Read query returned {len(results_json_str)} rows")
+
+                return [types.TextContent(type="text", text=results_json_str)]
+
+        except Exception as e:
+            logger.info(f"Database error executing query: {e}\n{query}\n{params}")
+            return [
+                types.TextContent(type="text", text=f"Error: {e}\n{query}\n{params}")
+            ]
 
     async def read_neo4j_cypher(
         query: str = Field(..., description="The Cypher query to execute."),
