@@ -3,40 +3,20 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from neo4j import AsyncGraphDatabase
-from testcontainers.neo4j import Neo4jContainer
+from neo4j import AsyncGraphDatabase, GraphDatabase
 
 from mcp_neo4j_cypher.server import create_mcp_server
 
-neo4j = (
-    Neo4jContainer("neo4j:latest")
-    .with_env("NEO4J_apoc_export_file_enabled", "true")
-    .with_env("NEO4J_apoc_import_file_enabled", "true")
-    .with_env("NEO4J_apoc_import_file_use__neo4j__config", "true")
-    .with_env("NEO4J_PLUGINS", '["apoc"]')
-)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def setup(request):
-    neo4j.start()
-
-    def remove_container():
-        neo4j.get_driver().close()
-        neo4j.stop()
-
-    request.addfinalizer(remove_container)
-    os.environ["NEO4J_URI"] = neo4j.get_connection_url()
-    os.environ["NEO4J_HOST"] = neo4j.get_container_host_ip()
-    os.environ["NEO4J_PORT"] = neo4j.get_exposed_port(7687)
-
-    yield neo4j
-
 
 @pytest_asyncio.fixture(scope="function")
-async def async_neo4j_driver(setup: Neo4jContainer):
+async def async_neo4j_driver():
+    """Create async Neo4j driver using environment variables for real database connection"""
+    db_url = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    username = os.getenv("NEO4J_USERNAME", "neo4j")
+    password = os.getenv("NEO4J_PASSWORD", "<setApassword123>")
+    
     driver = AsyncGraphDatabase.driver(
-        setup.get_connection_url(), auth=(setup.username, setup.password)
+        db_url, auth=(username, password)
     )
     try:
         yield driver
@@ -46,14 +26,31 @@ async def async_neo4j_driver(setup: Neo4jContainer):
 
 @pytest_asyncio.fixture(scope="function")
 async def mcp_server(async_neo4j_driver):
-    mcp = create_mcp_server(async_neo4j_driver, "neo4j")
-
+    """Create MCP server with real database connection"""
+    database = os.getenv("NEO4J_DATABASE", "neo4j")
+    mcp = create_mcp_server(async_neo4j_driver, database)
     return mcp
 
 
 @pytest.fixture(scope="function")
-def init_data(setup: Neo4jContainer, clear_data: Any):
-    with setup.get_driver().session(database="neo4j") as session:
+def sync_neo4j_driver():
+    """Create sync Neo4j driver for test data setup/cleanup"""
+    db_url = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    username = os.getenv("NEO4J_USERNAME", "neo4j")
+    password = os.getenv("NEO4J_PASSWORD", "<setApassword123>")
+    
+    driver = GraphDatabase.driver(db_url, auth=(username, password))
+    try:
+        yield driver
+    finally:
+        driver.close()
+
+
+@pytest.fixture(scope="function")
+def init_test_data(sync_neo4j_driver, clear_test_data: Any):
+    """Initialize test data in real database (only for container-based tests)"""
+    database = os.getenv("NEO4J_DATABASE", "neo4j")
+    with sync_neo4j_driver.session(database=database) as session:
         session.run("CREATE (a:Person {name: 'Alice', age: 30})")
         session.run("CREATE (b:Person {name: 'Bob', age: 25})")
         session.run("CREATE (c:Person {name: 'Charlie', age: 35})")
@@ -66,6 +63,10 @@ def init_data(setup: Neo4jContainer, clear_data: Any):
 
 
 @pytest.fixture(scope="function")
-def clear_data(setup: Neo4jContainer):
-    with setup.get_driver().session(database="neo4j") as session:
-        session.run("MATCH (n) DETACH DELETE n")
+def clear_test_data(sync_neo4j_driver):
+    """Clear test data from real database (use with caution!)"""
+    database = os.getenv("NEO4J_DATABASE", "neo4j")
+    with sync_neo4j_driver.session(database=database) as session:
+        # WARNING: This deletes ALL Person nodes and FRIEND relationships
+        # Only use this for dedicated test databases!
+        session.run("MATCH (n:Person) DETACH DELETE n")
