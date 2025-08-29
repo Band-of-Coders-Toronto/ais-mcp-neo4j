@@ -253,6 +253,51 @@ RETURN apoc.text.join(collect(label), ',')
                 types.TextContent(type="text", text=f"Error: {e}")
             ]
 
+    async def get_customer_requests(
+        customer_id: str = Field(..., description="The customer ID to get requests for."),
+    ) -> list[types.TextContent]:
+        """
+        Find customer requests for a specific customer.
+        Returns a list of customer_request objects ordered by created_date DESC.
+        """
+        if not customer_id.strip():
+            # Handle empty customer_id gracefully
+            return [types.TextContent(type="text", text="[]")]
+        
+        try:
+            # Query for customer requests based on the relationship pattern
+            query = """
+            MATCH (c:customer)-[:CUSTOMER]-(cr:customer_request)
+            WHERE c.id = $customer_id
+            RETURN cr
+            ORDER BY cr.created_on DESC
+            """
+            
+            params = {"customer_id": customer_id.strip()}
+            async with neo4j_driver.session(database=database) as session:
+                results_json_str = await session.execute_read(_read, query, params)
+
+                # Parse the results and extract customer_request objects from the 'cr' wrapper
+                parsed_results = json.loads(results_json_str)
+                formatted_results = []
+                
+                for result in parsed_results:
+                    if 'cr' in result:
+                        formatted_results.append(result['cr'])
+                
+                # Convert back to JSON string
+                formatted_results_json = json.dumps(formatted_results, default=str)
+                
+                logger.debug(f"Customer requests query returned {len(formatted_results)} requests")
+
+                return [types.TextContent(type="text", text=formatted_results_json)]
+
+        except Exception as e:
+            logger.info(f"Database error executing customer requests query: {e}")
+            return [
+                types.TextContent(type="text", text=f"Error: {e}")
+            ]
+
     async def read_neo4j_cypher(
         query: str = Field(..., description="The Cypher query to execute."),
         params: Optional[dict[str, Any]] = Field(
@@ -317,6 +362,7 @@ RETURN apoc.text.join(collect(label), ',')
     mcp.add_tool(get_count_nodes_by_label)
     mcp.add_tool(get_relationships_between_nodes)
     mcp.add_tool(find_customer_by_name)
+    mcp.add_tool(get_customer_requests)
     # mcp.add_tool(write_neo4j_cypher)
 
     return mcp

@@ -268,8 +268,6 @@ async def test_find_customer_by_name(mcp_server: FastMCP):
     assert isinstance(result, list), "Expected list of customers"
     
 
-# find_customer_by_name result: [{'c': {'updated_on': 'Wed Sep 25 2019 12:38:24 GMT-0400 (Eastern Daylight Time)', 'billing_address_city': 'MARTIGUES', 'code': 'Code-101', 'shipping_address_postal_code': '13800', 'shipping_address_street': 'SlC6ABt6QPm7ZlpEWo8bwROuf', 'shipping_address_city': 'MARTIGUES', 'same_address_as_parent_account': 'true', 'billing_address_street': 'SlC6ABt6QPm7ZlpEWo8bwROuf', 'created_on': 'Sat Jun 15 2019 20:22:30 GMT-0400 (Eastern Daylight Time)', 'service': 'true', 'different_address': 'true', 'shipping_address_name': '12 BOULEVARD DE THOLON', 'name': 'Abusus enim multitudine hominum-101', 'billing_address_name': '12 BOULEVARD DE THOLON', 'id': '101', 'billing_address_postal_code': '13800'}}]
-# parse the above structure better
     # Should return customers that match the search term
     if result:  # If customers found
         for customer in result:
@@ -303,5 +301,60 @@ async def test_find_customer_by_name(mcp_server: FastMCP):
     
     # Should handle empty search gracefully
     assert isinstance(result_empty, list), "Empty search should return a list"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_get_customer_requests(mcp_server: FastMCP):
+    """Test getting customer requests - this test should fail until the tool is implemented"""
+    
+    # Test getting customer requests for a specific customer ID
+    customer_id = "181"  # Using a customer we know exists
+    response = await mcp_server.call_tool("get_customer_requests", {
+        "customer_id": customer_id
+    })
+    
+    print(f"get_customer_requests response: {response}")
+    
+    # Handle the tuple response format
+    content_list, _ = response
+    result = json.loads(content_list[0].text)
+    print(f"get_customer_requests result: {result}")
+    
+    # Expected structure: list of customer_request objects
+    assert isinstance(result, list), "Expected list of customer requests"
+    
+    # If there are customer requests, verify their structure
+    if result:
+        for request in result:
+            assert isinstance(request, dict), "Each customer request should be a dict"
+            # Verify expected fields exist (based on actual data structure)
+            expected_fields = ["id", "created_on", "number"]
+            for field in expected_fields:
+                assert field in request, f"Each customer request should have a '{field}' field"
+    
+    # Test with a non-existent customer ID
+    response_nonexistent = await mcp_server.call_tool("get_customer_requests", {
+        "customer_id": "999999"
+    })
+    
+    content_list_nonexistent, _ = response_nonexistent
+    result_nonexistent = json.loads(content_list_nonexistent[0].text)
+    print(f"Non-existent customer requests result: {result_nonexistent}")
+    
+    # Should return empty list for non-existent customer
+    assert isinstance(result_nonexistent, list), "Expected list for non-existent customer"
+    assert len(result_nonexistent) == 0, "Should return empty list for non-existent customer"
+    
+    # Test with invalid input (empty customer_id)
+    response_empty = await mcp_server.call_tool("get_customer_requests", {
+        "customer_id": ""
+    })
+    
+    content_list_empty, _ = response_empty
+    result_empty = json.loads(content_list_empty[0].text)
+    print(f"Empty customer_id result: {result_empty}")
+    
+    # Should handle empty customer_id gracefully (either error or empty list)
+    assert isinstance(result_empty, (list, dict)), "Empty customer_id should return list or error object"
 
 
