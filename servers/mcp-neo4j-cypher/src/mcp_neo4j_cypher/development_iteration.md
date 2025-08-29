@@ -2,7 +2,7 @@
 
 ## Testing changes to server.py
 
-For all shell commands, substutite home_folder with the value '/c/repositories/ais'
+For all shell commands, substitute home_folder with the value '/c/repositories/ais'
 
 begin in the folder `home_folder/ais-mcp-neo4j/servers/mcp-neo4j-cypher`  
 1. Given a failing test, modify server.py to address the failure.
