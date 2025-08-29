@@ -148,14 +148,155 @@ RETURN apoc.text.join(collect(label), ',')
     ) -> list[types.TextContent]:
         """
         Fetch and return the distinct relationship types between two the given node types.
-        Specifically, those directed from node1 to node2.
+        Returns directional relationship information in format: node1->node2:TYPE, node2->node1:TYPE, node1-node2:
         Only labels returned by get_graph_labels() are valid.
         """
-        query =f"""
-MATCH (n1:{node1})-[r]->(n2:{node2}) 
-RETURN collect(DISTINCT type(r)) AS relationship_types
-"""
-        return await read_neo4j_cypher(query)
+        try:
+            async with neo4j_driver.session(database=database) as session:
+                # Query directed relationships node1 -> node2
+                forward_query = f"MATCH (n1:{node1})-[r]->(n2:{node2}) RETURN collect(DISTINCT type(r)) AS relationship_types"
+                forward_results = await session.execute_read(_read, forward_query, {})
+                forward_data = json.loads(forward_results)
+                forward_types = forward_data[0]["relationship_types"] if forward_data else []
+                
+                # Query directed relationships node2 -> node1
+                backward_query = f"MATCH (n2:{node2})-[r]->(n1:{node1}) RETURN collect(DISTINCT type(r)) AS relationship_types"
+                backward_results = await session.execute_read(_read, backward_query, {})
+                backward_data = json.loads(backward_results)
+                backward_types = backward_data[0]["relationship_types"] if backward_data else []
+                
+                # Query undirected relationships (both ways)
+                undirected_query = f"MATCH (n1:{node1})-[r]-(n2:{node2}) RETURN collect(DISTINCT type(r)) AS relationship_types"
+                undirected_results = await session.execute_read(_read, undirected_query, {})
+                undirected_data = json.loads(undirected_results)
+                all_undirected_types = undirected_data[0]["relationship_types"] if undirected_data else []
+                
+                # Calculate truly undirected relationships (those that appear in both directions)
+                forward_set = set(forward_types)
+                backward_set = set(backward_types)
+                all_directed = forward_set.union(backward_set)
+                truly_undirected = [rel for rel in all_undirected_types if rel not in all_directed]
+                
+                # Format the output as requested
+                formatted_relationships = []
+                
+                # Add directed relationships node1 -> node2
+                for rel_type in forward_types:
+                    formatted_relationships.append(f"{node1}->{node2}:{rel_type}")
+                
+                # Add directed relationships node2 -> node1
+                for rel_type in backward_types:
+                    formatted_relationships.append(f"{node2}->{node1}:{rel_type}")
+                
+                # Add undirected relationships (empty string after colon if none)
+                undirected_str = ",".join(truly_undirected) if truly_undirected else ""
+                formatted_relationships.append(f"{node1}-{node2}:{undirected_str}")
+                
+                # Create the result in expected format
+                result = [{"relationship_types": formatted_relationships}]
+                result_json = json.dumps(result)
+
+                logger.debug(f"Directional relationship query returned {len(formatted_relationships)} relationship entries")
+
+                return [types.TextContent(type="text", text=result_json)]
+
+        except Exception as e:
+            logger.info(f"Database error executing directional relationship query: {e}")
+            return [
+                types.TextContent(type="text", text=f"Error: {e}")
+            ]
+
+    async def find_customer_by_name(
+        name: str = Field(..., description="The customer name to search for (case insensitive)."),
+    ) -> list[types.TextContent]:
+        """
+        Find customers by name using case-insensitive search.
+        Returns a list of customer objects that contain the search term in their name.
+        Limited to 5 customer results.
+        """
+        if not name.strip():
+            # Handle empty search gracefully
+            return [types.TextContent(type="text", text="[]")]
+        
+        try:
+            # Use CONTAINS for case-insensitive partial matching
+            query = """
+            MATCH (c:customer)
+            WHERE toLower(c.name) CONTAINS toLower($name)
+            RETURN c
+            ORDER BY c.name
+            LIMIT 5
+            """
+            
+            params = {"name": name.strip()}
+            async with neo4j_driver.session(database=database) as session:
+                results_json_str = await session.execute_read(_read, query, params)
+
+                # Parse the results and extract customer objects from the 'c' wrapper
+                parsed_results = json.loads(results_json_str)
+                formatted_results = []
+                
+                for result in parsed_results:
+                    if 'c' in result:
+                        formatted_results.append(result['c'])
+                
+                # Convert back to JSON string
+                formatted_results_json = json.dumps(formatted_results, default=str)
+                
+                logger.debug(f"Customer search query returned {len(formatted_results)} customers")
+
+                return [types.TextContent(type="text", text=formatted_results_json)]
+
+        except Exception as e:
+            logger.info(f"Database error executing customer search query: {e}")
+            return [
+                types.TextContent(type="text", text=f"Error: {e}")
+            ]
+
+    async def get_customer_requests(
+        customer_id: str = Field(..., description="The customer ID to get requests for."),
+    ) -> list[types.TextContent]:
+        """
+        Find customer requests for a specific customer.
+        Returns a list of customer_request objects ordered by created_date DESC.
+        """
+        if not customer_id.strip():
+            # Handle empty customer_id gracefully
+            return [types.TextContent(type="text", text="[]")]
+        
+        try:
+            # Query for customer requests based on the relationship pattern
+            query = """
+            MATCH (c:customer)-[:CUSTOMER]-(cr:customer_request)
+            WHERE c.id = $customer_id
+            RETURN cr
+            ORDER BY cr.created_on DESC
+            """
+            
+            params = {"customer_id": customer_id.strip()}
+            async with neo4j_driver.session(database=database) as session:
+                results_json_str = await session.execute_read(_read, query, params)
+
+                # Parse the results and extract customer_request objects from the 'cr' wrapper
+                parsed_results = json.loads(results_json_str)
+                formatted_results = []
+                
+                for result in parsed_results:
+                    if 'cr' in result:
+                        formatted_results.append(result['cr'])
+                
+                # Convert back to JSON string
+                formatted_results_json = json.dumps(formatted_results, default=str)
+                
+                logger.debug(f"Customer requests query returned {len(formatted_results)} requests")
+
+                return [types.TextContent(type="text", text=formatted_results_json)]
+
+        except Exception as e:
+            logger.info(f"Database error executing customer requests query: {e}")
+            return [
+                types.TextContent(type="text", text=f"Error: {e}")
+            ]
 
     async def read_neo4j_cypher(
         query: str = Field(..., description="The Cypher query to execute."),
@@ -220,6 +361,8 @@ RETURN collect(DISTINCT type(r)) AS relationship_types
     mcp.add_tool(get_graph_labels)
     mcp.add_tool(get_count_nodes_by_label)
     mcp.add_tool(get_relationships_between_nodes)
+    mcp.add_tool(find_customer_by_name)
+    mcp.add_tool(get_customer_requests)
     # mcp.add_tool(write_neo4j_cypher)
 
     return mcp
