@@ -17,7 +17,7 @@ pytest tests/integration/test_server_IT.py::<function_name> -v -s
 ```
 pytest tests/integration/test_server_IT.py -v -s
 ```
-5. If all tests pass, rebuild and run the docker container with the following instructions. Otherwise, report on the failing tests, but don't fix them/
+5. If all tests pass, rebuild and run the docker container with the following instructions. Otherwise, report on the failing tests, but don't fix them.
 ```
 pushd home_folder/ais-hypernova/docker
 docker compose up -d mcp-neo4j-cypher --build
