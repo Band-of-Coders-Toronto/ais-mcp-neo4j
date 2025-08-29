@@ -247,3 +247,61 @@ async def test_get_relationships_between_nodes_real_db():
         await neo4j_driver.close()
 
 
+@pytest.mark.asyncio(loop_scope="function")
+async def test_find_customer_by_name(mcp_server: FastMCP):
+    """Test finding customers by name - this test should fail until the tool is implemented"""
+    
+    # Test searching for a customer by name
+    search_name = "Abusus enim multitudine hominum-101"
+    response = await mcp_server.call_tool("find_customer_by_name", {
+        "name": search_name
+    })
+    
+    print(f"find_customer_by_name response: {response}")
+    
+    # Handle the tuple response format
+    content_list, _ = response
+    result = json.loads(content_list[0].text)
+    print(f"find_customer_by_name result: {result}")
+    
+    # Expected structure: list of customer objects with at least name property
+    assert isinstance(result, list), "Expected list of customers"
+    
+
+# find_customer_by_name result: [{'c': {'updated_on': 'Wed Sep 25 2019 12:38:24 GMT-0400 (Eastern Daylight Time)', 'billing_address_city': 'MARTIGUES', 'code': 'Code-101', 'shipping_address_postal_code': '13800', 'shipping_address_street': 'SlC6ABt6QPm7ZlpEWo8bwROuf', 'shipping_address_city': 'MARTIGUES', 'same_address_as_parent_account': 'true', 'billing_address_street': 'SlC6ABt6QPm7ZlpEWo8bwROuf', 'created_on': 'Sat Jun 15 2019 20:22:30 GMT-0400 (Eastern Daylight Time)', 'service': 'true', 'different_address': 'true', 'shipping_address_name': '12 BOULEVARD DE THOLON', 'name': 'Abusus enim multitudine hominum-101', 'billing_address_name': '12 BOULEVARD DE THOLON', 'id': '101', 'billing_address_postal_code': '13800'}}]
+# parse the above structure better
+    # Should return customers that match the search term
+    if result:  # If customers found
+        for customer in result:
+            assert isinstance(customer, dict), "Each customer should be a dict"
+            assert "name" in customer, "Each customer should have a name field"
+            # Name should contain the search term (case insensitive)
+            assert search_name.lower() in customer["name"].lower(), f"Customer name '{customer['name']}' should contain '{search_name}'"
+            # Verify other expected fields exist
+            assert "id" in customer, "Each customer should have an id field"
+    
+    # Test with a more specific search
+    response_specific = await mcp_server.call_tool("find_customer_by_name", {
+        "name": "Smith"
+    })
+    
+    content_list_specific, _ = response_specific
+    result_specific = json.loads(content_list_specific[0].text)
+    print(f"Specific search result: {result_specific}")
+    
+    # Verify structure is consistent
+    assert isinstance(result_specific, list), "Expected list of customers for specific search"
+    
+    # Test edge case: empty search should return error or empty list
+    response_empty = await mcp_server.call_tool("find_customer_by_name", {
+        "name": ""
+    })
+    
+    content_list_empty, _ = response_empty
+    result_empty = json.loads(content_list_empty[0].text)
+    print(f"Empty search result: {result_empty}")
+    
+    # Should handle empty search gracefully
+    assert isinstance(result_empty, list), "Empty search should return a list"
+
+
