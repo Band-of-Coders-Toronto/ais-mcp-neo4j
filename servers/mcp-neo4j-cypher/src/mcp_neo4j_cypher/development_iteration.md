@@ -13,7 +13,7 @@ pytest tests/integration/test_server_IT.py::<function_name> -v -s
 3. If the test still fails:
     a) prompt if you want to make changes to the test itself
     b) repeat from step 1 as many as 10 times.
-4. When that test paseses, run the entire set of tests.
+4. When that test passes, run the entire set of tests.
 ```
 pytest tests/integration/test_server_IT.py -v -s
 ```
